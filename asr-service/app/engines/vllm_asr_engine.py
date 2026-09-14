@@ -140,11 +140,11 @@ class VLLMASREngine:
         logger.info("vLLM streaming warmup complete")
 
     # ── 三段式流式（同步；调用方在线程池内执行，避免阻塞事件循环）──
-    def new_state(self, language=None, chunk_size_sec=None):
+    def new_state(self, language=None, chunk_size_sec=None, context=""):
         """为一句新建流式状态。chunk_size_sec 可按会话覆盖（缺省=引擎默认）。"""
         css = clamp_chunk_size_sec(chunk_size_sec) if chunk_size_sec else self._chunk_size_sec
         return self._model.init_streaming_state(
-            language=language, chunk_size_sec=css,
+            context=context, language=language, chunk_size_sec=css,
             unfixed_chunk_num=self._unfixed_chunk_num,
             unfixed_token_num=self._unfixed_token_num)
 

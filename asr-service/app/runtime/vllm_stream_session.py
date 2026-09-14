@@ -91,6 +91,7 @@ class VllmStreamSession:
         self._executor = executor
         self._sem = infer_sem                  # asyncio.Semaphore：限同时解码会话数
         self.language = language
+        self.context = ""
         self._max_utt_samples = int(max_utterance_sec * _TARGET_SR)
         # 会话态
         self.audio_fs = _TARGET_SR
@@ -105,6 +106,10 @@ class VllmStreamSession:
 
     def configure(self, cfg_msg: dict) -> list:
         cfg_msg = cfg_msg or {}
+        context = cfg_msg.get("context", "")
+        if not isinstance(context, str) or len(context.encode("utf-8")) > 2048:
+            raise ValueError("context must be a UTF-8 string of at most 2048 bytes")
+        self.context = context
         raw_fs = cfg_msg.get("audio_fs", _TARGET_SR)
         try:
             audio_fs = int(raw_fs)
@@ -141,7 +146,7 @@ class VllmStreamSession:
 
     async def _begin_segment(self, start_ms):
         self._seg_start_ms = start_ms
-        self.state = await self._in_thread(self._engine.new_state, self.language, self._chunk_size_sec)
+        self.state = await self._in_thread(self._engine.new_state, self.language, self._chunk_size_sec, self.context)
         self._utt_samples = 0
         self._last_partial = ""
 
@@ -230,6 +235,7 @@ class VllmStreamBackend:
         self._count_lock = threading.Lock()
         self.capabilities = {
             "partial_results": True,
+            "hotword_context": True,
             "word_timestamps": False,
             "languages_auto": True,
             "speaker_labels": False,

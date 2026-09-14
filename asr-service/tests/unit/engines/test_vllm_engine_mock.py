@@ -23,7 +23,8 @@ class _MockModel:
         self.calls = []
 
     def init_streaming_state(self, language=None, chunk_size_sec=None,
-                             unfixed_chunk_num=None, unfixed_token_num=None):
+                             unfixed_chunk_num=None, unfixed_token_num=None, context=""):
+        self.context = context
         self.calls.append(("init", language, chunk_size_sec, unfixed_chunk_num, unfixed_token_num))
         return SimpleNamespace(text="", language=language or "")
 
@@ -136,3 +137,11 @@ def test_warmup_uses_disposable_state_and_bounded_audio(tmp_path):
     import pytest
     with pytest.raises(ValueError, match="16 kHz mono"):
         engine.warmup(sample)
+
+
+def test_hotword_context_is_forwarded_to_qwen_streaming_api():
+    engine = _engine_with_model()
+    engine.new_state(context="SyntheticTerm")
+    assert engine._model.context == "SyntheticTerm"
+    engine.new_state()
+    assert engine._model.context == ""

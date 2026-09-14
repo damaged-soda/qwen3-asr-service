@@ -98,3 +98,5 @@ docker run -d --gpus all -p 8765:8765 \
 ---
 
 If you find this project helpful, please consider giving a ⭐ on [GitHub](https://github.com/LanceLRQ/qwen3-asr-service) and [Docker Hub](https://hub.docker.com/r/lancelrq/qwen3-asr-service) — it really helps!
+
+原生 vLLM 流式现支持会话级热词 context，能力声明、限制与接线见 [热词上下文](docs/hotword-context.md)。

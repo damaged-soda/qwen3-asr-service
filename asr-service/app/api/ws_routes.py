@@ -84,8 +84,12 @@ async def stream(ws: WebSocket):
 
         start_msg = await asyncio.wait_for(             # 首条 {type:"start", ...}
             ws.receive_json(), timeout=deadline - loop.time())
-        logger.info(f"[stream] 收到 start: {start_msg}")
+        logger.info("[stream] received start sid=%s", sid[:8])
         try:
+            if not isinstance(start_msg, dict):
+                raise ValueError("start must be an object")
+            if start_msg.get("context") and not _backend.capabilities.get("hotword_context"):
+                raise ValueError("hotword context is not supported by this backend")
             warnings = session.configure(start_msg)
         except ValueError as e:
             # 配置校验失败属客户端错误，消息为服务端自产文案，可直接回传

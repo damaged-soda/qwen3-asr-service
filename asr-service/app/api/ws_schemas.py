@@ -15,6 +15,7 @@ class StartMsg(BaseModel):
     type: Literal["start"] = "start"
     audio_fs: int = 16000
     language: str | None = None
+    context: str = ""                 # vllm-native only; validated as <= 2048 UTF-8 bytes
     wav_name: str = "stream"
     identify_speakers: bool = False    # 声纹识别（需 speaker_identification 能力）
     return_speaker_id: bool = False    # final 信封回传声纹库 speaker_id（需 identify_speakers 命中/登记）

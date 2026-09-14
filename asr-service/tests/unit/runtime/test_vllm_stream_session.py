@@ -71,7 +71,7 @@ class _MockEngine:
         self.feeds = 0
         self.new_states = 0
 
-    def new_state(self, language=None, chunk_size_sec=None):
+    def new_state(self, language=None, chunk_size_sec=None, context=""):
         self.new_states += 1
         return SimpleNamespace(text="", language=language or "Chinese",
                                _acc="", chunk_size_sec=chunk_size_sec)
@@ -199,8 +199,8 @@ class _CaptureEngine(_MockEngine):
         super().__init__()
         self.audio = []
 
-    def new_state(self, language=None, chunk_size_sec=None):
-        state = super().new_state(language, chunk_size_sec)
+    def new_state(self, language=None, chunk_size_sec=None, context=""):
+        state = super().new_state(language, chunk_size_sec, context)
         state.audio = []
         self.audio.append(state.audio)
         return state
@@ -310,3 +310,42 @@ def test_backend_acquire_release_limits():
     backend.release(backend.create_session("x"))  # 释放一个名额
     assert asyncio.run(backend.acquire()) is True
     backend.shutdown()
+
+
+def test_hotword_context_reaches_every_segment_and_does_not_leak_between_sessions():
+    class Capture(_MockEngine):
+        def __init__(self):
+            super().__init__()
+            self.contexts = []
+        def new_state(self, language=None, chunk_size_sec=None, context=""):
+            self.contexts.append(context)
+            return super().new_state(language, chunk_size_sec, context)
+    engine = Capture()
+    backend, first = _make_session(engine, end_silence_ms=200, max_utterance_sec=1)
+    second = backend.create_session("synthetic-second")
+    first.configure({"context": "SyntheticTerm, ExampleAbbr"})
+    second.configure({})
+    async def run():
+        await _collect(first.feed_audio(_voice(200)))
+        await _collect(first.feed_audio(_silence(200)))
+        await _collect(first.feed_audio(_voice(1000)))  # forced split creates another state
+        await _collect(first.flush())
+        await _collect(second.feed_audio(_voice(200)))
+        await _collect(second.flush())
+    try:
+        asyncio.run(run())
+        assert engine.contexts == ["SyntheticTerm, ExampleAbbr"] * 3 + [""]
+        first.configure({})
+        assert first.context == ""
+    finally:
+        backend.shutdown()
+
+
+@pytest.mark.parametrize("context", [None, [], {}, 123, "词" * 683])
+def test_invalid_hotword_context_is_rejected(context):
+    backend, session = _make_session()
+    try:
+        with pytest.raises(ValueError, match="context"):
+            session.configure({"context": context})
+    finally:
+        backend.shutdown()
