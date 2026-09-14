@@ -194,6 +194,98 @@ def test_feed_audio_silence_only_no_segment():
     assert eng.new_states == 0 and eng.feeds == 0
 
 
+class _CaptureEngine(_MockEngine):
+    def __init__(self):
+        super().__init__()
+        self.audio = []
+
+    def new_state(self, language=None, chunk_size_sec=None):
+        state = super().new_state(language, chunk_size_sec)
+        state.audio = []
+        self.audio.append(state.audio)
+        return state
+
+    def feed(self, arr, state):
+        state.audio.append(arr.copy())
+        return super().feed(arr, state)
+
+
+def _decoded(pcm):
+    return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+
+
+@pytest.mark.parametrize("quiet_ms", [(100, 100), (175, 175, 175), (1000,)])
+def test_preroll_preserves_latest_quiet_samples_without_waiting(quiet_ms):
+    eng = _CaptureEngine()
+    backend, sess = _make_session(eng)
+    quiet = [_pcm16_bytes(0.001 * (i + 1), ms) for i, ms in enumerate(quiet_ms)]
+    voice = _voice(100)
+
+    async def run():
+        for pcm in quiet:
+            assert await _collect(sess.feed_audio(pcm)) == []
+        assert eng.new_states == 0               # 低音量缓冲本身不触发识别
+        msgs = await _collect(sess.feed_audio(voice))
+        assert msgs[0]["type"] == "partial"     # 当前帧立即触发，无需等后续帧
+        return await _collect(sess.flush())
+
+    try:
+        finals = asyncio.run(run())
+        expected = b"".join(quiet)[-SR * 300 // 1000 * 2:] + voice
+        np.testing.assert_array_equal(np.concatenate(eng.audio[0]), _decoded(expected))
+        assert finals[0]["start"] == max(0, sum(quiet_ms) - 300)
+        assert finals[0]["end"] == sum(quiet_ms) + 100  # 回补不重复累计时间
+    finally:
+        backend.shutdown()
+
+
+def test_preroll_does_not_replay_previous_segment_tail():
+    eng = _CaptureEngine()
+    backend, sess = _make_session(eng, end_silence_ms=200)
+    quiet = _pcm16_bytes(0.002, 100)
+
+    async def run():
+        await _collect(sess.feed_audio(_voice(100)))
+        first = await _collect(sess.feed_audio(_silence(200)))
+        await _collect(sess.feed_audio(quiet))
+        await _collect(sess.feed_audio(_voice(100)))
+        return first + await _collect(sess.flush())
+
+    try:
+        msgs = asyncio.run(run())
+        np.testing.assert_array_equal(np.concatenate(eng.audio[0]),
+                                      _decoded(_voice(100) + _silence(200)))
+        np.testing.assert_array_equal(np.concatenate(eng.audio[1]),
+                                      _decoded(quiet + _voice(100)))
+        finals = [m for m in msgs if m["type"] == "final"]
+        assert [(m["seg_id"], m["start"], m["end"]) for m in finals] == [
+            (0, 0, 300), (1, 300, 500)]
+    finally:
+        backend.shutdown()
+
+
+@pytest.mark.parametrize("reset", ["configure", "flush"])
+def test_preroll_is_cleared_at_task_boundary(reset):
+    eng = _CaptureEngine()
+    backend, sess = _make_session(eng)
+
+    async def run():
+        await _collect(sess.feed_audio(_pcm16_bytes(0.002, 300)))
+        if reset == "configure":
+            sess.configure({"audio_fs": SR})
+        else:
+            assert await _collect(sess.flush()) == []
+        await _collect(sess.feed_audio(_voice(100)))
+        return await _collect(sess.flush())
+
+    try:
+        finals = asyncio.run(run())
+        np.testing.assert_array_equal(np.concatenate(eng.audio[0]), _decoded(_voice(100)))
+        assert finals[0]["start"] == (0 if reset == "configure" else 300)
+    finally:
+        backend.shutdown()
+
+
 # ─── VllmStreamBackend ───
 
 def test_backend_capabilities():
