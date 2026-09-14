@@ -3,6 +3,7 @@ import logging
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -44,6 +45,29 @@ def test_native_context_reaches_sdk_and_is_not_logged(caplog):
                     assert ws.receive_json()['type'] == 'session.closed'
         assert engine._model.contexts == ["SyntheticPrivateTerm", ""]
         assert "SyntheticPrivateTerm" not in caplog.text
+    finally:
+        backend.shutdown()
+        ws_routes.init_ws_stream(None)
+
+
+@pytest.mark.parametrize("start", [[], {"type": "start", "context": "SyntheticTerm"}])
+def test_invalid_start_or_unsupported_context_fails_before_inference(start):
+    engine = VLLMASREngine()
+    engine._model = Model()
+    backend = VllmStreamBackend(engine)
+    backend.capabilities = {**backend.capabilities, "hotword_context": False}
+    ws_routes.init_ws_stream(backend)
+    app = FastAPI()
+    app.include_router(ws_routes.ws_router_stream)
+    try:
+        with TestClient(app) as client, client.websocket_connect("/v2/asr/stream") as ws:
+            assert ws.receive_json()['capabilities']['hotword_context'] is False
+            ws.send_json(start)
+            error = ws.receive_json()
+            assert (error['type'], error['code'], error['fatal']) == ('error', 'invalid_config', True)
+            assert ws.receive_json()['type'] == 'session.closed'
+        assert engine._model.contexts == []
+        assert backend._active == 0
     finally:
         backend.shutdown()
         ws_routes.init_ws_stream(None)
