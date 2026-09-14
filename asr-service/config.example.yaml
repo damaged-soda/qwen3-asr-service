@@ -104,3 +104,12 @@ enable_dashscope_api: false # 挂载 DashScope 兼容接口 /compat/dashscope/ap
 # compat_fetch_timeout: 120       # file_urls 下载整体超时（秒）
 # compat_fetch_allow_private: false # 允许下载私网/回环地址（SSRF 默认禁止；仅内网可信环境放开）
 # compat_external_base_url: ""     # 回链外部基址（反代/容器，如 https://asr.example.com；默认按请求推导）
+
+# vLLM 共卡运行：显式限制资源，未设置时沿用引擎默认。
+# vllm_max_num_seqs: 1
+# vllm_max_num_batched_tokens: 1024
+# vllm_kv_cache_memory_bytes: 268435456
+# vllm_enforce_eager: true
+# vllm_skip_mm_profiling: true
+# vllm_max_new_tokens: 256
+# vllm_warmup_audio: /path/to/public-16k-mono.wav

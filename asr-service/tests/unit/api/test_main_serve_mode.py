@@ -728,3 +728,21 @@ def test_vllm_mode_compat_disabled_by_default(isolated_create_app, monkeypatch):
     assert client.get("/v2/capabilities").json()["compat"] == {
         "openai": False, "dashscope": False, "realtime": False, "realtime_partial": False}
     assert client.get("/compat/openai/v1/models").status_code == 404
+
+
+def test_vllm_warmup_runs_before_ready_and_failure_aborts(isolated_create_app, monkeypatch):
+    import app.main as main
+    import app.engines.vllm_asr_engine as module
+    _mock_vllm_engine(monkeypatch)
+    calls = []
+    cls = module.VLLMASREngine
+    monkeypatch.setattr(cls, "load", lambda self: calls.append("load"))
+    monkeypatch.setattr(cls, "warmup", lambda self, path: calls.append(path), raising=False)
+    main.create_app(_args(serve_mode="vllm", vllm_warmup_audio="public.wav"))
+    assert calls == ["load", "public.wav"]
+
+    def fail(self, path):
+        raise ValueError("warmup failed")
+    monkeypatch.setattr(cls, "warmup", fail)
+    with pytest.raises(SystemExit):
+        main.create_app(_args(serve_mode="vllm", vllm_warmup_audio="missing.wav"))

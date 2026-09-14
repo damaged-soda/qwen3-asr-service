@@ -192,6 +192,41 @@ ARG_SPECS = (
         help_en=f"vLLM max context length; lower to save KV cache memory (default: {cfg.VLLM_MAX_MODEL_LEN})",
     ),
     ArgSpec(
+        key="vllm_max_num_seqs", flags=("--vllm-max-num-seqs",),
+        default=None, type=int, group="vLLM",
+        help="并行序列上限；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_max_num_batched_tokens", flags=("--vllm-max-num-batched-tokens",),
+        default=None, type=int, group="vLLM",
+        help="单批 token 上限；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_kv_cache_memory_bytes", flags=("--vllm-kv-cache-memory-bytes",),
+        default=None, type=int, group="vLLM",
+        help="KV 缓存字节数（覆盖显存占用率预算）；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_enforce_eager", flags=("--vllm-enforce-eager",),
+        default=None, type=bool, group="vLLM",
+        help="禁用编译和 CUDA graph；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_skip_mm_profiling", flags=("--vllm-skip-mm-profiling",),
+        default=None, type=bool, group="vLLM",
+        help="跳过多模态预估（须自行为编码器留显存）；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_max_new_tokens", flags=("--vllm-max-new-tokens",),
+        default=None, type=int, group="vLLM",
+        help="单次识别输出 token 上限；留空沿用引擎默认",
+    ),
+    ArgSpec(
+        key="vllm_warmup_audio", flags=("--vllm-warmup-audio",),
+        default=None, type=str, group="vLLM",
+        help="启动前预热样本路径（16 kHz 单声道，最多读取 2 秒）；留空沿用引擎默认",
+    ),
+    ArgSpec(
         key="vllm_chunk_size_sec", flags=("--vllm-chunk-size-sec",),
         default=None, type=float, group="vLLM",
         help=f"流式解码块大小（秒），越小 partial 越细腻 (default: {cfg.VLLM_CHUNK_SIZE_SEC})",
