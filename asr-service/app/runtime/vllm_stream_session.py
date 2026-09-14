@@ -15,6 +15,8 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
+
 from app.utils.audio_resampler import pcm_bytes_to_array, resample_to_16k
 from app.runtime.noise_gate import rms_dbfs
 from app.utils.validation import coerce_num_in_range
@@ -23,6 +25,7 @@ from app.utils.language import to_engine_language
 logger = logging.getLogger(__name__)
 
 _TARGET_SR = 16000
+_PRE_ROLL_SAMPLES = _TARGET_SR * 300 // 1000
 _MIN_AUDIO_FS = 8000
 _MAX_AUDIO_FS = 96000
 CHUNK_SIZE_SEC_RANGE = (0.5, 5.0)      # 与 vllm_asr_engine.clamp_chunk_size_sec 对齐
@@ -98,6 +101,7 @@ class VllmStreamSession:
         self._total_ms = 0                     # 会话累计音频时长（ms）
         self._utt_samples = 0                  # 当前句已喂样本数
         self._last_partial = ""
+        self._pre_roll = np.empty(0, dtype=np.float32)
 
     def configure(self, cfg_msg: dict) -> list:
         cfg_msg = cfg_msg or {}
@@ -124,6 +128,7 @@ class VllmStreamSession:
         self._total_ms = 0
         self._utt_samples = 0
         self._last_partial = ""
+        self._pre_roll = np.empty(0, dtype=np.float32)
         warnings = [k for k in _UNSUPPORTED_KEYS if cfg_msg.get(k) is not None]
         logger.info(f"[vllm-stream] 会话配置 sid={self.sid[:8]} audio_fs={self.audio_fs} "
                     f"language={self.language} chunk={self._chunk_size_sec or '默认'} "
@@ -161,9 +166,17 @@ class VllmStreamSession:
         dur_ms = int(arr.size * 1000 / _TARGET_SR)
         events = self._endpointer.process(arr, frame_ms=dur_ms)
 
-        # 句开始：先建状态，使本帧即进入新句
+        # 只回补尚未喂给模型的起音，端点仍只判断当前帧，不额外等待。
         if self.state is None and any(e["type"] == "start" for e in events):
-            await self._begin_segment(self._total_ms)
+            start_ms = self._total_ms - int(self._pre_roll.size * 1000 / _TARGET_SR)
+            await self._begin_segment(max(0, start_ms))
+            if self._pre_roll.size:
+                arr = np.concatenate((self._pre_roll, arr))
+                self._pre_roll = np.empty(0, dtype=np.float32)
+        elif self.state is None:
+            # 截取后复制，避免一个很长的静音帧被数组视图整块保留。
+            self._pre_roll = np.concatenate((self._pre_roll, arr[-_PRE_ROLL_SAMPLES:]))[
+                -_PRE_ROLL_SAMPLES:].copy()
 
         # 句内：喂本帧，文本变化则发 partial
         if self.state is not None:
@@ -188,6 +201,7 @@ class VllmStreamSession:
 
     async def flush(self):
         """收到 stop：冲刷未闭合句出 final。"""
+        self._pre_roll = np.empty(0, dtype=np.float32)
         if self.state is not None:
             yield await self._finish_segment(self._total_ms)
 

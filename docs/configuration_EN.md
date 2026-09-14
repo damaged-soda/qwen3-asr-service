@@ -157,6 +157,8 @@ Effective only in vllm mode; requires a CUDA GPU and an isolated environment/ima
 | `vllm_energy_floor_dbfs` | `-45.0` | Streaming energy-endpoint gate (dBFS); above this counts as speech / sentence start |
 | `vllm_offline_chunk_sec` | `180` | Offline chunk-by-chunk transcription chunk length (sec); lower = finer progress, lower peak VRAM (see [Long audio & progress](#vllm-native-streaming-mode) below) |
 
+While waiting for speech, streaming sessions retain the most recent 300 ms of audio. Once the energy threshold is reached, this audio is fed immediately with the current frame to preserve quiet onsets. The buffer is measured in resampled 16 kHz samples and only contains audio not yet fed to the model; segment start timestamps include the retained audio. Silence alone still does not trigger recognition. Stopping or reconfiguring a session clears the buffer. No client changes or extra waiting timer are required; audio never captured or sent by the client cannot be recovered.
+
 ### Config-file Meta Parameters
 
 | Parameter | Description |
