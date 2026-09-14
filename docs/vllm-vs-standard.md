@@ -133,3 +133,19 @@
 - [配置文档 · vLLM 原生流式模式](configuration.md#vllm-原生流式模式)
 - [部署文档 · vLLM 镜像](deployment.md)
 - [兼容接口](api/compat.md)
+
+
+## 共卡部署与启动预热
+
+可在 YAML 中配置 `vllm_max_num_seqs`、`vllm_max_num_batched_tokens`、
+`vllm_kv_cache_memory_bytes`、`vllm_enforce_eager`、`vllm_skip_mm_profiling`、
+`vllm_max_new_tokens`，对应 CLI 参数将下划线换为连字符。整数必须为正；
+未配置时不向引擎传值，沿用原默认行为。
+
+显式 KV 字节数会覆盖 `gpu_memory_utilization` 的自动预算；跳过多模态预估时，
+须另外为音频编码器的运行峰值留出显存。256 MiB KV 的测试配置应配合
+`vllm_max_model_len: 2048`、单序列及有界音频长度，不是任意模型的通用预算。
+
+`vllm_warmup_audio` 指向部署目录外的公开 16 kHz 单声道音频样本。服务在开放端口前，
+用最多前 2 秒音频执行流式识别和收尾，丢弃结果及会话状态，避免首位用户承担首次推理
+开销。样本读取或预热失败则启动失败，不对外宣告就绪；不把私人录音写入仓库。

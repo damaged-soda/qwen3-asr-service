@@ -91,7 +91,11 @@ LEGACY_DEFAULTS = {
 
 
 def test_schema_defaults_match_legacy():
-    assert schema_defaults() == LEGACY_DEFAULTS
+    runtime_defaults = dict.fromkeys((
+        "vllm_max_num_seqs", "vllm_max_num_batched_tokens", "vllm_kv_cache_memory_bytes",
+        "vllm_enforce_eager", "vllm_skip_mm_profiling", "vllm_max_new_tokens", "vllm_warmup_audio",
+    ))
+    assert schema_defaults() == {**LEGACY_DEFAULTS, **runtime_defaults}
 
 
 def test_no_args_only_meta_keys():

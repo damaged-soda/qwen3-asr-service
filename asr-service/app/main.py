@@ -678,11 +678,19 @@ def _assemble_vllm(app: FastAPI, args) -> None:
         enable_align=cfg.VLLM_ENABLE_ALIGN,
         align_device=cfg.VLLM_ALIGN_DEVICE,
         infer_batch_size=cfg.VLLM_INFER_BATCH_SIZE,
+        max_num_seqs=getattr(args, "vllm_max_num_seqs", None),
+        max_num_batched_tokens=getattr(args, "vllm_max_num_batched_tokens", None),
+        kv_cache_memory_bytes=getattr(args, "vllm_kv_cache_memory_bytes", None),
+        enforce_eager=getattr(args, "vllm_enforce_eager", None),
+        skip_mm_profiling=getattr(args, "vllm_skip_mm_profiling", None),
+        max_new_tokens=getattr(args, "vllm_max_new_tokens", None),
     )
     try:
         engine.load()
+        if getattr(args, "vllm_warmup_audio", None):
+            engine.warmup(args.vllm_warmup_audio)
     except Exception as e:
-        logger.critical(f"vLLM 引擎加载失败: {e}", exc_info=True)
+        logger.critical(f"vLLM 引擎加载或预热失败: {e}", exc_info=True)
         sys.exit(1)
 
     # 说话人分离引擎（Phase 2，可选，非 funasr：CAM++ + scipy/sklearn 聚类）：加载失败

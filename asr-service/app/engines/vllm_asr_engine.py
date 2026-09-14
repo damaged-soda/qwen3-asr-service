@@ -35,7 +35,9 @@ class VLLMASREngine:
     def __init__(self, model_size="0.6b", *, gpu_memory_utilization=0.8,
                  max_model_len=None, chunk_size_sec=1.0,
                  unfixed_chunk_num=2, unfixed_token_num=5, enable_align=True,
-                 align_device="cuda", infer_batch_size=4):
+                 align_device="cuda", infer_batch_size=4, max_num_seqs=None,
+                 max_num_batched_tokens=None, kv_cache_memory_bytes=None,
+                 enforce_eager=None, skip_mm_profiling=None, max_new_tokens=None):
         self._model_size = model_size
         self._gpu_mem = gpu_memory_utilization
         self._max_model_len = max_model_len
@@ -52,6 +54,23 @@ class VLLMASREngine:
         # 内部按 ≤180s 切块，默认 -1 会把全部块一次性喂对齐器前向 → 长音频激活叠加 OOM。
         # 取有界小值=逐批对齐、峰值显存随批大小线性下降（块数为 1 的短音频无差异）。
         self._infer_batch_size = int(infer_batch_size)
+        self._runtime_options = {}
+        for name, value in {
+            "max_num_seqs": max_num_seqs,
+            "max_num_batched_tokens": max_num_batched_tokens,
+            "kv_cache_memory_bytes": kv_cache_memory_bytes,
+            "max_new_tokens": max_new_tokens,
+        }.items():
+            if value is not None:
+                if type(value) is not int or value <= 0:
+                    raise ValueError(f"{name} must be a positive integer")
+                self._runtime_options[name] = value
+        for name, value in {"enforce_eager": enforce_eager,
+                            "skip_mm_profiling": skip_mm_profiling}.items():
+            if value is not None:
+                if type(value) is not bool:
+                    raise ValueError(f"{name} must be boolean")
+                self._runtime_options[name] = value
         self._model = None
         # vllm.LLM.generate 非并发安全：与路线 B 同思路，用锁串行化（见 §3 并发）
         self._infer_lock = threading.Lock()
@@ -72,6 +91,7 @@ class VLLMASREngine:
 
         llm_kwargs = dict(gpu_memory_utilization=self._gpu_mem,
                           max_inference_batch_size=self._infer_batch_size)
+        llm_kwargs.update(self._runtime_options)
         if self._max_model_len:
             llm_kwargs["max_model_len"] = self._max_model_len
 
@@ -102,6 +122,22 @@ class VLLMASREngine:
                     f"chunk={self._chunk_size_sec}s align={self._enable_align}"
                     f"{f'@{self._align_device}' if self._enable_align else ''} "
                     f"infer_batch={self._infer_batch_size}")
+
+    def warmup(self, audio_path):
+        """用部署者提供的 16 kHz 单声道样本预热；结果丢弃，状态不复用。"""
+        import soundfile as sf
+        with sf.SoundFile(audio_path) as sample:
+            if sample.samplerate != 16000 or sample.channels != 1:
+                raise ValueError("warmup audio must be 16 kHz mono")
+            audio = sample.read(32000, dtype="float32")
+        if audio.size == 0:
+            raise ValueError("warmup audio must not be empty")
+        state = self.new_state()
+        chunk = int(self.chunk_size_sec * 16000)
+        for offset in range(0, audio.size, chunk):
+            self.feed(audio[offset:offset + chunk], state)
+        self.finish(state)
+        logger.info("vLLM streaming warmup complete")
 
     # ── 三段式流式（同步；调用方在线程池内执行，避免阻塞事件循环）──
     def new_state(self, language=None, chunk_size_sec=None):

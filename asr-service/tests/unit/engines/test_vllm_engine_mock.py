@@ -91,3 +91,48 @@ def test_infer_batch_size_default_bounded():
     """对齐/ASR 批大小默认有界（4，非 -1）：防长音频把全部 180s 块一次对齐致 OOM。"""
     assert VLLMASREngine()._infer_batch_size == 4
     assert VLLMASREngine(infer_batch_size=1)._infer_batch_size == 1
+
+
+def test_load_forwards_bounded_runtime_options(monkeypatch):
+    import sys
+    import app.engines.vllm_asr_engine as module
+    calls = []
+    monkeypatch.setattr(module, "ensure_model", lambda *a: None)
+    monkeypatch.setitem(sys.modules, "qwen_asr", SimpleNamespace(
+        Qwen3ASRModel=SimpleNamespace(LLM=lambda **kw: calls.append(kw) or _MockModel())))
+    engine = VLLMASREngine(enable_align=False, max_num_seqs=1,
+                          max_num_batched_tokens=1024, kv_cache_memory_bytes=268435456,
+                          enforce_eager=True, skip_mm_profiling=True, max_new_tokens=256)
+    engine.load()
+    assert calls[0]["max_num_seqs"] == 1
+    assert calls[0]["max_num_batched_tokens"] == 1024
+    assert calls[0]["kv_cache_memory_bytes"] == 268435456
+    assert calls[0]["enforce_eager"] is True
+    assert calls[0]["skip_mm_profiling"] is True
+    assert calls[0]["max_new_tokens"] == 256
+    VLLMASREngine(enable_align=False).load()
+    assert "kv_cache_memory_bytes" not in calls[1]
+
+
+def test_invalid_runtime_limits_rejected_before_loading():
+    import pytest
+    for options in ({"max_num_seqs": True}, {"kv_cache_memory_bytes": 0},
+                    {"max_num_batched_tokens": -1}, {"enforce_eager": 1},
+                    {"skip_mm_profiling": "true"}, {"max_new_tokens": 0}):
+        with pytest.raises(ValueError):
+            VLLMASREngine(**options)
+
+
+def test_warmup_uses_disposable_state_and_bounded_audio(tmp_path):
+    import soundfile as sf
+    sample = tmp_path / "warmup.wav"
+    sf.write(sample, np.zeros(64000, np.float32), 16000)
+    engine = _engine_with_model(chunk_size_sec=0.5)
+    engine.warmup(sample)
+    assert [c[0] for c in engine._model.calls] == ["init", "feed", "feed", "feed", "feed", "finish"]
+    assert sum(c[1] for c in engine._model.calls if c[0] == "feed") == 32000
+    assert engine.new_state().text == ""
+    sf.write(sample, np.zeros(8000, np.float32), 8000)
+    import pytest
+    with pytest.raises(ValueError, match="16 kHz mono"):
+        engine.warmup(sample)
